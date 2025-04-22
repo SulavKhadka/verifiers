@@ -24,6 +24,12 @@ dependencies = [
     "math-verify[antlr4-13-2]>=0.1.0",
     "pylatexenc>=2.10",
     "requests>=2.32.3",
+    "psycopg>=3.2.6",
+    "psycopg-binary>=3.2.6",
+    "pgvector>=0.4.0",
+    "sentence-transformers>=4.1.0",
+    "hf-transfer>=0.1.9",
+    "nvitop>=1.4.2",
 ]
 
 [tool.setuptools]
