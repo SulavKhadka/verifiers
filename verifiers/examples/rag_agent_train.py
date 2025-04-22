@@ -234,15 +234,21 @@ def correctness_embedding_reward_func(completions, **kwargs) -> list[float]:
     for completion, ground_truth in zip(completions, kwargs['answer']):
         last_answer = get_last_answer(completion)
 
-        ground_truth_embedding, last_answer_embedding = embed_model.encode([ground_truth, last_answer], task="retrieval.query")
+        parsed = xml_parser.parse(last_answer)
+        if hasattr(parsed, 'answer') and parsed.answer is not None:
+            last_answer = parsed.answer
+        
+            ground_truth_embedding, last_answer_embedding = embed_model.encode([ground_truth, last_answer], task="retrieval.query")
 
-        similarity = np.dot(ground_truth_embedding, last_answer_embedding) / (np.linalg.norm(ground_truth_embedding) * np.linalg.norm(last_answer_embedding))
-        if similarity > 0.9:
-            score = 0.8
-        elif similarity > 0.84:
-            score = 0.4
+            similarity = np.dot(ground_truth_embedding, last_answer_embedding) / (np.linalg.norm(ground_truth_embedding) * np.linalg.norm(last_answer_embedding))
+            if similarity > 0.9:
+                score = 0.8
+            elif similarity > 0.84:
+                score = 0.4
+            else:
+                score = 0.0
         else:
-            score = 0.0
+            score = -0.1
         graded_responses.append(score)
     
     return graded_responses
