@@ -60,7 +60,7 @@ def format_tool_descriptions(schemas: List[Dict[str, Any]]) -> str:
     """Formats tool schemas into a user-friendly description string."""
     descriptions = []
     for schema in schemas:
-        desc = [f"{schema['name']}: {schema['description']}"]
+        desc = [f"**{schema['name']}** : {schema['description']}"]
         
         desc.append("\nArguments:")
         for arg_name, arg_info in schema['args'].items():

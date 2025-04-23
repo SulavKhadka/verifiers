@@ -28,6 +28,8 @@ dependencies = [
     "pgvector>=0.4.0",
     "psycopg-binary>=3.2.6",
     "sentence-transformers>=4.1.0",
+    "hf-transfer>=0.1.9",
+    "nvitop>=1.4.2",
 ]
 
 [tool.setuptools]

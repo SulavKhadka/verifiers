@@ -36,7 +36,7 @@ chsh -s $(which zsh)
 
 
 # Launch vLLM inference server from verifiers/, with .venv active
-CUDA_VISIBLE_DEVICES=1 python verifiers/inference/vllm_serve.py --model "Qwen/Qwen2.5-1.5B-Instruct" --max_model_len 16384  --gpu_memory_utilization 0.5 --enable_prefix_caching True
+CUDA_VISIBLE_DEVICES=1 python verifiers/inference/vllm_serve.py --model "Qwen/Qwen2.5-1.5B-Instruct" --max_model_len 16384  --gpu_memory_utilization 0.7 --enable_prefix_caching True
 # Run training script from verifiers/, with .venv active
 CUDA_VISIBLE_DEVICES=0 accelerate launch verifiers/examples/math_train.py
 

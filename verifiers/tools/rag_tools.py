@@ -4,7 +4,7 @@ from psycopg.rows import dict_row
 from pgvector.psycopg import register_vector
 from sentence_transformers import SentenceTransformer
 from datetime import datetime
-
+import re
 
 class RAGTools:
     """
@@ -105,6 +105,48 @@ class RAGTools:
         Returns:
             List of dictionaries containing the query results with datetime objects converted to strings
         """
+        
+        # First, check for dangerous operations
+        if "CREATE TABLE" in sql_query.upper():
+            raise ValueError("CREATE TABLE is not allowed, only SELECT queries are allowed")
+        
+        # Parse the query to determine if it's an aggregate query
+        cleaned_query = sql_query.upper().strip()
+        
+        # Check if a LIMIT is required
+        requires_limit = True
+        
+        # Aggregate functions naturally limit results
+        aggregate_patterns = [
+            r"SELECT\s+COUNT\s*\(",
+            r"SELECT\s+SUM\s*\(",
+            r"SELECT\s+AVG\s*\(",
+            r"SELECT\s+MIN\s*\(",
+            r"SELECT\s+MAX\s*\("
+        ]
+        
+        # Check if it contains any aggregate function patterns
+        for pattern in aggregate_patterns:
+            if re.search(pattern, cleaned_query):
+                requires_limit = False
+                break
+        
+        # Check for GROUP BY with aggregate functions (still limited result set)
+        if "GROUP BY" in cleaned_query and re.search(r"(COUNT|SUM|AVG|MIN|MAX)\s*\(", cleaned_query):
+            requires_limit = False
+        
+        # Check for queries that select a single row by primary key
+        if re.search(r"WHERE\s+\w+\s*=\s*['\"]?\w+['\"]?\s+(AND|OR|$|\s*LIMIT)", cleaned_query):
+            requires_limit = False
+        
+        # If a LIMIT is already present, we don't need to enforce it
+        if re.search(r"LIMIT\s+\d+", cleaned_query):
+            requires_limit = False
+        
+        # Enforce LIMIT if needed
+        if requires_limit:
+            raise ValueError("LIMIT is required for non-aggregate queries. Please add a LIMIT clause.")
+        
         try:
             if params:
                 results = self.kb_cursor.execute(sql_query, params).fetchall()
