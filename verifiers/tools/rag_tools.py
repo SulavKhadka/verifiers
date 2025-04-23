@@ -52,6 +52,9 @@ class RAGTools:
         Returns:
             List of dictionaries containing the query results
         """
+        if not isinstance(columns_to_select, list):
+            raise ValueError("columns_to_select must be a list")
+
         # Get allowed tables dynamically from the database
         self.kb_cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
         table_search = self.kb_cursor.fetchall()

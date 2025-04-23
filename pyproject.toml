@@ -10,20 +10,24 @@ requires-python = ">=3.11,<3.13"
 dependencies = [
     "torch==2.5.1",
     "setuptools",
-    "deepspeed",
-    "accelerate",
     "peft",
     "wandb",
     "rich",
     "duckduckgo-search",
     "trl==0.16.0",
-    "liger-kernel",
     "vllm",
     "brave-search",
     "latex2sympy>=1.0.3",
     "math-verify[antlr4-13-2]>=0.1.0",
     "pylatexenc>=2.10",
     "requests>=2.32.3",
+    "transformers>=4.51.3",
+    "ipykernel>=6.29.5",
+    "ipywidgets>=8.1.6",
+    "psycopg>=3.2.6",
+    "pgvector>=0.4.0",
+    "psycopg-binary>=3.2.6",
+    "sentence-transformers>=4.1.0",
 ]
 
 [tool.setuptools]
