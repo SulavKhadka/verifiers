@@ -5,7 +5,6 @@ import verifiers as vf
 from verifiers.tools import RAGTools
 from verifiers.parsers import XMLParser
 import numpy as np
-from secret_keys import DB_PASSWORD
 
 """
 Multi-GPU training (single node, 4 training + 4 inference)
@@ -25,11 +24,6 @@ YOUR TASK:
 1. Use tools to find information in the knowledge base
 2. Think through the user's query and the information you find
 3. Format your response using the EXACT tags specified below
-
-# TOOL INFORMATION
-You have access to the following tools:
-
-{tool_descriptions}
 
 # DB SCHEMA
 ```
@@ -142,7 +136,7 @@ To use a tool, write a JSON command inside <tool> tags with:
 
 Example tool usage:
 <tool>
-{{"name": "vector_search", "args": {{"query": "quantum computing basics"}}}}
+{{"name": "embedding_lookup", "args": {{"query": "quantum computing basics"}}}}
 </tool>
 
 The tool's output will appear inside <result> tags.
@@ -167,7 +161,8 @@ Your final analysis of all information gathered
 Your clear answer to the user's question
 </answer>
 
-# EXAMPLE
+# EXAMPLE WITH HYPOTHETICAL TOOLS
+```
 User: What is quantum computing?
 
 Assistant:
@@ -190,7 +185,7 @@ Now I have information about quantum computing basics. I should also find inform
 </reasoning>
 
 <tool>
-{{"name": "vector_search", "args": {{"query": "quantum computing vs classical computing differences"}}}}
+{{"name": "search_database", "args": {{"query": "SELECT * FROM statements WHERE statement_text LIKE '%quantum%' AND statement_text LIKE '%classical%' LIMIT 10"}}}}
 </tool>
 
 User:
@@ -207,8 +202,14 @@ I now have sufficient information to answer the question. Quantum computing uses
 Quantum computing is a type of computing that uses quantum bits (qubits) instead of classical bits. While classical bits can only be in states of 0 or 1, qubits can exist in multiple states simultaneously due to quantum superposition, allowing quantum computers to solve certain problems much faster than classical computers.
 </answer>
 
+```
+# AVAILABLE TOOLS
+You have access to the following tools:
+
+{tool_descriptions}
+
 # REMEMBER
-- You MUST use ALWAYS output <reasoning> tags for your analysis
+- You MUST use ALWAYS output <reasoning> tags every response showing your thought process/analysis
 - You MUST use <tool> tags for tool calls
 - You MUST use <answer> tags ONLY for your final response
 - The program will EXIT if <answer> tags are not found
@@ -232,24 +233,39 @@ def get_last_answer(trajectory) -> str | None:
 def correctness_embedding_reward_func(completions, **kwargs) -> list[float]:
     graded_responses = []
     for completion, ground_truth in zip(completions, kwargs['answer']):
+        tool_attempts = 0
+        for i, msg in enumerate(completion):
+            if msg['role'] == 'assistant':
+                # Use parser to check for tool tag
+                parsed = xml_parser.parse(msg['content'])
+                if hasattr(parsed, 'tool') and parsed.tool is not None:
+                    tool_attempts += 1
+
+        tool_multiplier = 1.0
+        if tool_attempts == 0:
+            tool_multiplier = 0.1
+        elif tool_attempts <= 2:
+            tool_multiplier = 0.6
+            
+
         last_answer = get_last_answer(completion)
 
         parsed = xml_parser.parse(last_answer)
         if hasattr(parsed, 'answer') and parsed.answer is not None:
             last_answer = parsed.answer
         
-            ground_truth_embedding, last_answer_embedding = embed_model.encode([ground_truth, last_answer], task="retrieval.query")
+            ground_truth_embedding, last_answer_embedding = embed_model.encode([ground_truth, last_answer], task="retrieval.passage")
 
             similarity = np.dot(ground_truth_embedding, last_answer_embedding) / (np.linalg.norm(ground_truth_embedding) * np.linalg.norm(last_answer_embedding))
-            if similarity > 0.9:
+            if similarity > 0.96:
+                score = 1.0
+            elif similarity > 0.92:
                 score = 0.8
-            elif similarity > 0.84:
-                score = 0.4
             else:
                 score = 0.0
         else:
-            score = -0.1
-        graded_responses.append(score)
+            score = -0.2
+        graded_responses.append(score * tool_multiplier)
     
     return graded_responses
 
@@ -285,44 +301,7 @@ def tool_execution_reward_func(completions, **kwargs):
         
         # Calculate reward
         if tool_attempts == 0:
-            return 0.0
-        return (successful_executions / tool_attempts)
-    
-    return [check_execution(c) for c in completions]
-
-def reward_func(completions, **kwargs):
-    """
-    Reward function that checks tool execution success.
-
-    Uses XMLParser to identify proper tool calls.
-    """
-    def check_execution(trajectory):
-        tool_attempts = 0
-        successful_executions = 0
-        
-        # Find assistant messages with tools and their responses
-        for i, msg in enumerate(trajectory):
-            if msg['role'] == 'assistant':
-                # Use parser to check for tool tag
-                parsed = xml_parser.parse(msg['content'])
-                if hasattr(parsed, 'tool') and parsed.tool is not None:
-                    # Found a properly formatted tool message
-                    if i + 1 < len(trajectory) and trajectory[i + 1]['role'] == 'user':
-                        tool_attempts += 1
-                        # Check response with env_parser
-                        multiplier = 1.0 
-                        response = str(parsed.tool)
-                        if (("vector_search_from_kb" in response) or ("query_db" in response)) and len(response) > 50:
-                            multiplier = 1.5
-                        else:
-                            multiplier = 0.5
-                        parsed_response = env_parser.parse(trajectory[i + 1]['content'])
-                        if hasattr(parsed_response, 'result') and parsed_response.result is not None and not parsed_response.result.startswith("Error:"):
-                            successful_executions += 1 * multiplier
-        
-        # Calculate reward
-        if tool_attempts == 0:
-            return 0.0
+            return -0.2
         return (successful_executions / tool_attempts)
     
     return [check_execution(c) for c in completions]
@@ -348,19 +327,22 @@ def soft_format_reward_func(completions, **kwargs) -> list[float]:
                     answer_attempts += 1
         
         # Calculate reward
-        return 0.8*(reasoning_attempts/len(trajectory)) + 0.4*(tool_attempts/len(trajectory)) + 0.4*(answer_attempts/len(trajectory))
-
+        score = 0.8*(reasoning_attempts/len(trajectory)) + 0.5*(tool_attempts/len(trajectory)) + 0.2*(answer_attempts/len(trajectory))
+        if score == 0.0:
+            return -0.2
+        return score
+    
     scores = [check_execution(c) for c in completions]
     return scores
 
 def strict_format_reward_func(completions, **kwargs) -> list[float]:
     """Reward function that checks if the completion has a specific format."""
-    final_response_pattern = r"^<reasoning>\n[\s\S]*?\n</reasoning>\n\n<answer>\n.*?\n</answer>$"
+    final_response_pattern = r"^<reasoning>\n[\s\S]*?\n</reasoning>\n\n<answer>\n[\s\S]*?\n</answer>$"
 
     responses = [get_last_answer(completion) for completion in completions]
 
     matches = [re.match(final_response_pattern, r) for r in responses]
-    return [1.0 if match else 0.0 for match in matches]
+    return [1.0 if match else -1.0 for match in matches]
 
 
 dataset = load_dataset("Sulav/agent-rag-grpo-qa-2nd-trial")["train"]
@@ -382,36 +364,38 @@ vf_env = vf.ToolEnv(
     system_prompt=AGENT_THINKING_SYSTEM_PROMPT,
     few_shot=[],
     tools=[rag_tools.vector_search_from_kb, rag_tools.query_db],
-    max_steps=6
+    max_steps=8
 )
 print(vf_env.system_prompt)
 
-model_name = "Qwen/Qwen2.5-1.5B-Instruct"
+model_name = "Qwen/Qwen2.5-Coder-3B-Instruct"
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
 run_name = "math-grpo_" + model_name.split("/")[-1].lower()
 
 training_args=GRPOConfig(
     output_dir=f"outputs/{run_name}",
     run_name=run_name,
-    learning_rate=1e-6,
+    learning_rate=5e-7,
     lr_scheduler_type="constant_with_warmup",
-    warmup_steps=10,
+    warmup_steps=100,
     num_train_epochs=1,
+    top_p=0.95,
+    repetition_penalty=1.07,
     temperature=0.7,
     max_steps=1000,
     bf16=True,
-    max_grad_norm=0.1,
-    num_iterations=2,
-    beta=0.002,
+    max_grad_norm=1.0,
+    num_iterations=4,
+    beta=0.1,
     max_prompt_length=2048,
-    max_completion_length=2048,
+    max_completion_length=1024,
     per_device_train_batch_size=12,
     per_device_eval_batch_size=12,
     num_generations=6,
-    gradient_accumulation_steps=1,
+    gradient_accumulation_steps=2,
     gradient_checkpointing=True,
     eval_strategy="steps",
-    eval_steps=100,
+    eval_steps=150,
     eval_accumulation_steps=1,
     eval_on_start=False,
     save_strategy="steps",
@@ -421,12 +405,13 @@ training_args=GRPOConfig(
     vllm_max_model_len=16384,
     vllm_server_host="0.0.0.0", # replace with your inference server's host for multi-node setups
     vllm_server_port=8000,
-    vllm_gpu_memory_utilization=0.95,
+    vllm_gpu_memory_utilization=0.98,
     logging_steps=1,
     log_on_each_node=False,
     log_completions=True,
     report_to="wandb",
-    reward_weights=[0.30, 0.25, 0.25, 0.2]
+    reward_weights=[0.45, 0.24, 0.18, 0.13],
+    scale_rewards=False
 )
 trainer = vf.GRPOEnvTrainer(
     model=model,
