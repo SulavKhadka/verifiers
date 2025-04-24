@@ -23,7 +23,8 @@ You are a helpful assistant with retrieval capabilities and access to tools.
 YOUR TASK:
 1. Use tools to find information in the knowledge base
 2. Think through the user's query and the information you find
-3. Format your response using the EXACT tags specified below
+3. Once you have some info from the KB, use more tool calls and ensure you have enough info to produce the answer
+4. Format your response using the EXACT tags specified below
 
 # DB SCHEMA
 ```
@@ -127,7 +128,6 @@ YOUR TASK:
 - Carefully look through the DB SCHEMA before making tool calls
 - Think carefully about each step of your reasoning process
 - Format ALL your responses using the EXACT tags shown below
-- The program will EXIT if <answer> tags are not found in your final response
 
 # HOW TO USE TOOLS
 To use a tool, write a JSON command inside <tool> tags with:
@@ -181,7 +181,7 @@ User:
 
 Assistant:
 <reasoning>
-Now I have information about quantum computing basics. I should also find information about how it differs from classical computing for a more complete answer.
+Now I have information about quantum computing basics. I still need more info. Next I should find information about how it differs from classical computing for a more complete answer.
 </reasoning>
 
 <tool>
@@ -209,10 +209,11 @@ You have access to the following tools:
 {tool_descriptions}
 
 # REMEMBER
-- You MUST use ALWAYS output <reasoning> tags every response showing your thought process/analysis
-- You MUST use <tool> tags for tool calls
-- You MUST use <answer> tags ONLY for your final response
-- The program will EXIT if <answer> tags are not found
+- You MUST use ALWAYS output <reasoning></reasoning> tags every response showing your thought process/analysis
+- You MUST use <tool></tool> tags for tool calls
+- You MUST use <answer></answer> tags ONLY for your final response
+- The conversation will end if </answer> tag is found
+- ALWAYS look carefully at the AVAILABLE TOOLS and DB SCHEMA before making tool calls
 """
 
 from sentence_transformers import SentenceTransformer
@@ -245,7 +246,7 @@ def correctness_embedding_reward_func(completions, **kwargs) -> list[float]:
         if tool_attempts == 0:
             tool_multiplier = 0.1
         elif tool_attempts <= 2:
-            tool_multiplier = 0.6
+            tool_multiplier = 0.5
             
 
         last_answer = get_last_answer(completion)
@@ -257,14 +258,14 @@ def correctness_embedding_reward_func(completions, **kwargs) -> list[float]:
             ground_truth_embedding, last_answer_embedding = embed_model.encode([ground_truth, last_answer], task="retrieval.passage")
 
             similarity = np.dot(ground_truth_embedding, last_answer_embedding) / (np.linalg.norm(ground_truth_embedding) * np.linalg.norm(last_answer_embedding))
-            if similarity > 0.96:
+            if similarity > 0.92:
                 score = 1.0
-            elif similarity > 0.92:
-                score = 0.8
+            elif similarity > 0.82:
+                score = 0.5
             else:
                 score = 0.0
         else:
-            score = -0.2
+            score = -0.3
         graded_responses.append(score * tool_multiplier)
     
     return graded_responses
@@ -310,24 +311,34 @@ def soft_format_reward_func(completions, **kwargs) -> list[float]:
     """Reward function that checks if the completion has a specific format."""
 
     def check_execution(trajectory):
-        tool_attempts = 0
         reasoning_attempts = 0
-        answer_attempts = 0
+        reason_and_tool_attempts = 0
+        reason_and_answer_attempts = 0
 
         # Find assistant messages with tools and their responses
+        num_assistant_messages = 0
         for i, msg in enumerate(trajectory):
             if msg['role'] == 'assistant':
+                num_assistant_messages += 1
                 # Use parser to check for tool tag
                 parsed = xml_parser.parse(msg['content'])
-                if hasattr(parsed, 'reasoning') and parsed.reasoning is not None:
+                
+                reason_formatting = hasattr(parsed, 'reasoning') and parsed.reasoning is not None
+                if reason_formatting:
                     reasoning_attempts += 1
-                if hasattr(parsed, 'tool') and parsed.tool is not None:
-                    tool_attempts += 1
-                if hasattr(parsed, 'answer') and parsed.answer is not None:
-                    answer_attempts += 1
+                    if hasattr(parsed, 'tool') and parsed.tool is not None:
+                        reason_and_tool_attempts += 1
+                    elif hasattr(parsed, 'answer') and parsed.answer is not None and i + 1 == len(trajectory):
+                        reason_and_answer_attempts += 1
         
         # Calculate reward
-        score = 0.8*(reasoning_attempts/len(trajectory)) + 0.5*(tool_attempts/len(trajectory)) + 0.2*(answer_attempts/len(trajectory))
+        if num_assistant_messages == 0:
+            return -0.2
+        score = (
+            0.4 * (reasoning_attempts/num_assistant_messages) +
+            0.3 * (reason_and_tool_attempts/max(1, num_assistant_messages - 1)) +
+            0.3 * reason_and_answer_attempts
+        )
         if score == 0.0:
             return -0.2
         return score
@@ -352,6 +363,7 @@ train_dataset = dataset["train"]
 eval_dataset = dataset["test"]
 
 # Load tools
+
 rag_tools = RAGTools(
     db_conn_string=f"host=citation-rag-postgres-do-user-12298230-0.f.db.ondigitalocean.com user=doadmin password={DB_PASSWORD} dbname=defaultdb port=25060",
     model_name="jinaai/jina-embeddings-v3",
@@ -376,7 +388,7 @@ training_args=GRPOConfig(
     output_dir=f"outputs/{run_name}",
     run_name=run_name,
     learning_rate=5e-7,
-    lr_scheduler_type="constant_with_warmup",
+    lr_scheduler_type="cosine",
     warmup_steps=100,
     num_train_epochs=1,
     top_p=0.95,
@@ -388,14 +400,14 @@ training_args=GRPOConfig(
     num_iterations=4,
     beta=0.1,
     max_prompt_length=2048,
-    max_completion_length=1024,
-    per_device_train_batch_size=12,
-    per_device_eval_batch_size=12,
-    num_generations=6,
+    max_completion_length=768,
+    per_device_train_batch_size=16,
+    per_device_eval_batch_size=16,
+    num_generations=8,
     gradient_accumulation_steps=2,
     gradient_checkpointing=True,
     eval_strategy="steps",
-    eval_steps=150,
+    eval_steps=100,
     eval_accumulation_steps=1,
     eval_on_start=False,
     save_strategy="steps",
@@ -410,7 +422,7 @@ training_args=GRPOConfig(
     log_on_each_node=False,
     log_completions=True,
     report_to="wandb",
-    reward_weights=[0.45, 0.24, 0.18, 0.13],
+    reward_weights=[1.0, 0.45, 0.25, 0.25],
     scale_rewards=False
 )
 trainer = vf.GRPOEnvTrainer(

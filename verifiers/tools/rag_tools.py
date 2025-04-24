@@ -53,21 +53,21 @@ class RAGTools:
             List of dictionaries containing the query results
         """
         if not isinstance(columns_to_select, list):
-            raise ValueError("columns_to_select must be a list")
+            return "Error: columns_to_select must be a list"
 
         # Get allowed tables dynamically from the database
         self.kb_cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
         table_search = self.kb_cursor.fetchall()
         allowed_tables = [row['table_name'] for row in table_search]
         if table_name not in allowed_tables:
-            raise ValueError(f"Table '{table_name}' is not allowed")
+            return f"Error: Table '{table_name}' is not allowed"
 
         # Get allowed columns dynamically from the database
         self.kb_cursor.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'")
         allowed_columns = [row['column_name'] for row in self.kb_cursor.fetchall()]
         for col in columns_to_select + [embedding_column]:
             if col not in allowed_columns:
-                raise ValueError(f"Column '{col}' is not allowed")
+                return f"Error: Column '{col}' is not allowed"
         
         query_embedding = self.model.encode(query, task="retrieval.query", show_progress_bar=False).tolist()
         
@@ -89,7 +89,7 @@ class RAGTools:
             self.db_conn.commit()
         except Exception as e:
             self.db_conn.rollback()
-            raise ValueError(f"Error executing query: {str(e)}")
+            return f"Error: query execution failed: {str(e)}"
         
         return vector_results
     
@@ -108,7 +108,7 @@ class RAGTools:
         
         # First, check for dangerous operations
         if "CREATE TABLE" in sql_query.upper():
-            raise ValueError("CREATE TABLE is not allowed, only SELECT queries are allowed")
+            return "Error: CREATE TABLE is not allowed, only SELECT queries are allowed"
         
         # Parse the query to determine if it's an aggregate query
         cleaned_query = sql_query.upper().strip()
@@ -145,7 +145,7 @@ class RAGTools:
         
         # Enforce LIMIT if needed
         if requires_limit:
-            raise ValueError("LIMIT is required for non-aggregate queries. Please add a LIMIT clause.")
+            return "Error: LIMIT is required for non-aggregate queries. Please add a LIMIT clause."
         
         try:
             if params:
@@ -168,7 +168,7 @@ class RAGTools:
             return serializable_results
         except Exception as e:
             self.db_conn.rollback()
-            raise ValueError(f"Error executing query: {str(e)}")
+            return f"Error: query execution failed: {str(e)}"
     
     def close(self):
         """Close the database connection."""
