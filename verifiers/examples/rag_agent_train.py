@@ -144,7 +144,7 @@ The tool's output will appear inside <result> tags.
 # OUTPUT FORMAT - FOLLOW THIS EXACTLY
 For your thinking process:
 <reasoning>
-Your detailed analysis of the query and information found
+Your internal thought process, tool call planning, anddetailed analysis of the query and information found
 </reasoning>
 
 For tool calls:
@@ -244,7 +244,8 @@ def correctness_embedding_reward_func(completions, **kwargs) -> list[float]:
 
         tool_multiplier = 1.0
         if tool_attempts == 0:
-            tool_multiplier = 0.1
+            graded_responses.append(-0.5)
+            continue
         elif tool_attempts <= 2:
             tool_multiplier = 0.5
             
@@ -263,9 +264,10 @@ def correctness_embedding_reward_func(completions, **kwargs) -> list[float]:
             elif similarity > 0.82:
                 score = 0.5
             else:
-                score = 0.0
+                graded_responses.append(-0.3)
+                continue
         else:
-            score = -0.3
+            score = 0.0
         graded_responses.append(score * tool_multiplier)
     
     return graded_responses
@@ -380,7 +382,7 @@ vf_env = vf.ToolEnv(
 )
 print(vf_env.system_prompt)
 
-model_name = "Qwen/Qwen2.5-Coder-3B-Instruct"
+model_name = "Qwen/Qwen2.5-Coder-1.5B-Instruct"
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
 run_name = "math-grpo_" + model_name.split("/")[-1].lower()
 
