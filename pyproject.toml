@@ -30,6 +30,8 @@ dependencies = [
     "sentence-transformers>=4.1.0",
     "hf-transfer>=0.1.9",
     "nvitop>=1.4.2",
+    "deepspeed>=0.16.7",
+    "accelerate>=1.6.0",
 ]
 
 [tool.setuptools]
