@@ -1,3 +1,4 @@
+from unsloth import FastLanguageModel
 from datasets import load_dataset
 from trl import GRPOConfig
 import re
@@ -5,7 +6,6 @@ import verifiers as vf
 from verifiers.tools import RAGTools
 from verifiers.parsers import XMLParser
 import numpy as np
-
 """
 Multi-GPU training (single node, 4 training + 4 inference)
 
@@ -16,6 +16,33 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python verifiers/inference/vllm_serve.py --model 'Q
 
 CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml verifiers/examples/math_train.py
 """
+
+model_name = "Qwen/Qwen3-4B"
+max_seq_length = 8192 # Can increase for longer reasoning traces
+lora_rank = 64 # Larger rank = smarter, but slower
+
+print("Loading model...")
+model, tokenizer = FastLanguageModel.from_pretrained(
+    model_name = model_name,
+    max_seq_length = max_seq_length,
+    load_in_4bit = True, # False for LoRA 16bit
+    fast_inference = True, # Enable vLLM fast inference
+    max_lora_rank = lora_rank,
+    gpu_memory_utilization = 0.6, # Reduce if out of memory
+)
+print("Model loaded")
+model = FastLanguageModel.get_peft_model(
+    model,
+    r = lora_rank, # Choose any number > 0 ! Suggested 8, 16, 32, 64, 128
+    target_modules = [
+        "q_proj", "k_proj", "v_proj", "o_proj",
+        "gate_proj", "up_proj", "down_proj",
+    ], # Remove QKVO if out of memory
+    lora_alpha = lora_rank,
+    use_gradient_checkpointing = "unsloth", # Enable long context finetuning
+    random_state = 3407,
+)
+print("PEFT Model loaded")
 
 AGENT_THINKING_SYSTEM_PROMPT = """
 You are a helpful assistant with retrieval capabilities and access to tools.
@@ -365,7 +392,6 @@ train_dataset = dataset["train"]
 eval_dataset = dataset["test"]
 
 # Load tools
-
 rag_tools = RAGTools(
     db_conn_string=f"host=citation-rag-postgres-do-user-12298230-0.f.db.ondigitalocean.com user=doadmin password={DB_PASSWORD} dbname=defaultdb port=25060",
     model_name="jinaai/jina-embeddings-v3",
@@ -382,10 +408,8 @@ vf_env = vf.ToolEnv(
 )
 print(vf_env.system_prompt)
 
-model_name = "Qwen/Qwen2.5-Coder-1.5B-Instruct"
-model, tokenizer = vf.get_model_and_tokenizer(model_name)
-run_name = "math-grpo_" + model_name.split("/")[-1].lower()
 
+run_name = "math-grpo_" + model_name.split("/")[-1].lower()
 training_args=GRPOConfig(
     output_dir=f"outputs/{run_name}",
     run_name=run_name,
